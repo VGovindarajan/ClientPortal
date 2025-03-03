@@ -14,9 +14,7 @@ public class ApiClient : ObservableObject{
     
     @Published private(set) var isLoading = false // Add a published property for loading state
     @Published private(set) var errorMessage: String? = nil // Published error message
-    static let shared = ApiClient()
-    private let baseURL = "http://127.0.0.1:5000/"
-    private var authToken: String?
+    private let baseURL = "http://127.0.0.1:5000/api"
     
     func setLoading(loading:Bool)-> Bool{
         isLoading = loading
@@ -30,7 +28,7 @@ public class ApiClient : ObservableObject{
     
     
     func login(username: String, password: String, completion: @escaping (Result<User, ApiError>) -> Void) async {
-        let fullURLString = baseURL + "api/login" // Combine base URL and endpoint
+        let fullURLString = baseURL + "/login" // Combine base URL and endpoint
         guard let url = URL(string: fullURLString) else {
             completion(.failure(.invalidURL))
             return
@@ -48,8 +46,8 @@ public class ApiClient : ObservableObject{
         }
         do{
             let (data, urlResponse) = try await URLSession.shared.data(for: request)
-            print(data)
-            print(urlResponse)
+            //print(data)
+            //print(urlResponse)
             guard let httpResponse = urlResponse as? HTTPURLResponse,
                   !(400...401).contains(httpResponse.statusCode) else {
                       completion(.failure(.unauthorized))
@@ -62,7 +60,7 @@ public class ApiClient : ObservableObject{
                 return
             }
             let user = try JSONDecoder().decode(User.self, from: data)
-            authToken = user.token
+            Settings.saveUserJwt(user.token)
             completion(.success(user))
             return
         }catch{
@@ -72,23 +70,35 @@ public class ApiClient : ObservableObject{
     }
     
     func getAccounts() async throws -> [Account] {
-        guard let token = authToken else {
+        guard let token = Settings.getUserJwt() else {
             throw ApiError.unauthorized
         }
-        
+
         guard let url = URL(string: "\(baseURL)/accounts") else {
             throw ApiError.invalidURL
         }
-        
+
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        
-        let (data, _) = try await URLSession.shared.data(for: request)
+
+        let (data, urlResponse) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = urlResponse as? HTTPURLResponse else {
+            throw ApiError.invalidResponse
+        }
+
+        guard !(400...401).contains(httpResponse.statusCode) else {
+            throw ApiError.unauthorized
+        }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            throw ApiError.invalidResponse
+        }
+        let jsonData = String(data: data, encoding: .utf8)
+        print(jsonData ?? "")
         return try JSONDecoder().decode([Account].self, from: data)
     }
-    
-    func getAccountDetails(accountNumber: String) async throws -> AccountDetails {
-        guard let token = authToken else {
+    func getAccountDetails(accountNumber: String) async throws -> Account {
+        guard let token = Settings.getUserJwt() else {
             throw ApiError.unauthorized
         }
         
@@ -100,7 +110,8 @@ public class ApiClient : ObservableObject{
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
         let (data, _) = try await URLSession.shared.data(for: request)
-        return try JSONDecoder().decode(AccountDetails.self, from: data)
+        return try JSONDecoder().decode(Account.self, from: data)
+    
     }
 }
 
